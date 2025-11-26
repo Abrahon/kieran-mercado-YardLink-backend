@@ -11,6 +11,10 @@ User = get_user_model()
 # ---------------------------
 # SIGNUP SERIALIZER
 # ---------------------------
+from rest_framework import serializers
+from django.core.validators import RegexValidator
+from .models import User, RoleChoices  # make sure RoleChoices exists
+
 class SignupSerializer(serializers.ModelSerializer):
     password = serializers.CharField(
         write_only=True,
@@ -42,6 +46,11 @@ class SignupSerializer(serializers.ModelSerializer):
         },
     )
 
+    role = serializers.ChoiceField(
+        choices=RoleChoices.choices,  # ❗ user must send role; no default
+        error_messages={"required": "Role field is required."},
+    )
+
     class Meta:
         model = User
         fields = ["name", "email", "password", "confirm_password", "role"]
@@ -58,10 +67,8 @@ class SignupSerializer(serializers.ModelSerializer):
             )
         return attrs
 
-    def create(self, validated_data):
-        validated_data.pop("confirm_password")
-        user = User.objects.create_user(**validated_data)
-        return user
+    # ❌ REMOVE create() in OTP flow!
+    # User creation happens in VerifyOTPView after OTP is verified
 
 
 # ---------------------------
@@ -111,29 +118,33 @@ class SendOTPSerializer(serializers.Serializer):
 # ---------------------------
 # VERIFY OTP SERIALIZER
 # ---------------------------
+
+
+from rest_framework import serializers
+from .models import OTP
+
 class VerifyOTPSerializer(serializers.Serializer):
-    code = serializers.CharField(max_length=6)
+    email = serializers.EmailField()
+    otp = serializers.CharField(max_length=6)
 
     def validate(self, data):
-        request = self.context.get("request")
-        email = request.data.get("email")
+        email = data.get('email')
+        otp_code = data.get('otp')
 
-        if not email:
-            raise serializers.ValidationError(
-                "No OTP request found. Please request OTP first."
-            )
+        # check OTP exists
+        try:
+            otp = OTP.objects.filter(email=email).latest('created_at')
+        except OTP.DoesNotExist:
+            raise serializers.ValidationError("OTP not found for this email.")
 
-        user = User.objects.filter(email=email).first()
-        if not user:
-            raise serializers.ValidationError("User not found.")
+        if otp.is_expired():
+            raise serializers.ValidationError("OTP expired.")
 
-        otp = OTP.objects.filter(user=user, code=data["code"]).order_by("-created_at").first()
-        if not otp or otp.is_expired():
-            raise serializers.ValidationError("OTP is invalid or expired.")
+        if otp.code != otp_code:
+            raise serializers.ValidationError("Invalid OTP.")
 
-        data["user"] = user
+        data['otp_instance'] = otp
         return data
-
 
 # ---------------------------
 # RESET PASSWORD SERIALIZER
