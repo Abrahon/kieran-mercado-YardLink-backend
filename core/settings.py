@@ -13,6 +13,7 @@ from decouple import config
 from datetime import timedelta
 from decouple import config
 from pathlib import Path
+import cloudinary
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -40,9 +41,14 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    "cloudinary",
+    "cloudinary_storage",
     'rest_framework',
     'corsheaders', 
-    'accounts' ,
+    'accounts.apps.AccountsConfig',
+    'profiles.apps.ProfilesConfig',
+    
+
 
 ]
 
@@ -100,6 +106,23 @@ DATABASES = {
         'PORT': config('DB_PORT', default='5432'),
     }
 }
+
+
+
+
+cloudinary.config(
+    cloud_name=config("CLOUDINARY_CLOUD_NAME"),
+    api_key=config("CLOUDINARY_API_KEY"),
+    api_secret=config("CLOUDINARY_API_SECRET"),
+    secure=True
+)
+
+# Optional: If you want to use cloudinary_storage for DEFAULT_FILE_STORAGE
+DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
+MEDIA_URL = '/media/'
+
+
+
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
