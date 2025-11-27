@@ -7,6 +7,8 @@ import requests
 from django.conf import settings
 from django.shortcuts import render, redirect
 from django.contrib.auth import get_user_model
+from django.utils import timezone
+from datetime import timedelta
 
 from rest_framework import generics, status
 from rest_framework.views import APIView
@@ -78,7 +80,9 @@ class SignupView(generics.GenericAPIView):
         email = serializer.validated_data["email"]
         name = serializer.validated_data["name"]
         password = serializer.validated_data["password"]
-        role = serializer.validated_data["role"]  # ✅ MUST SAVE
+        phone = serializer.validated_data.get("phone")
+        address = serializer.validated_data.get("address")
+        role = serializer.validated_data["role"]  
 
         # Check duplicate
         if User.objects.filter(email=email).exists():
@@ -89,7 +93,9 @@ class SignupView(generics.GenericAPIView):
             "email": email,
             "name": name,
             "password": password,
-            "role": role,   # 🔥 FIX: store role
+            "phone": phone,
+            "address": address,
+            "role": role,   
         }
 
         # Delete previous OTPs
@@ -108,11 +114,15 @@ class SignupView(generics.GenericAPIView):
         return Response({"detail": "Verification OTP sent to email."}, status=200)
 
 
+
 def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
     refresh['role'] = user.role
     refresh['name'] = user.name 
-    refresh['email'] = user.email 
+    refresh['email'] = user.email
+    refresh['phone'] = user.phone
+    refresh['address'] = user.address
+
      # optional
     return {
         'refresh': str(refresh),
@@ -154,6 +164,8 @@ class LoginView(generics.GenericAPIView):
                 "email": user.email,
                 "name": user.name,
                 "role": user.role,
+                "phone": getattr(user, 'phone', None),      
+                "address": getattr(user, 'address', None),  
             }
         }, status=status.HTTP_200_OK)
 
@@ -241,7 +253,10 @@ class VerifyOTPView(APIView):
             email=pending["email"],
             name=pending["name"],
             password=pending["password"],
-            role=pending["role"],  # ✅ Now exists
+            phone=pending['phone'],
+            address=pending['address'],
+
+            role=pending["role"],  
             is_active=True
         )
 
@@ -249,7 +264,7 @@ class VerifyOTPView(APIView):
         otp_instance.delete()
         del request.session["pending_user"]
 
-        return Response({"message": "OTP verified and account created successfully."}, status=200)
+        return Response({"message": "Email verified and account created successfully."}, status=200)
 
 
 
@@ -344,28 +359,53 @@ class ResetPasswordView(generics.GenericAPIView):
         return Response({"message": "Password reset successfully."}, status=status.HTTP_200_OK)
     
 
+# role wise filtering user client landscaper
+
+
 class UserListView(APIView):
-    permission_classes = [IsAuthenticated]  # only logged-in users can access
-    # or use [permissions.AllowAny] if you want it public
+    permission_classes = [IsAdminUser]
 
     def get(self, request):
         try:
+            role = request.query_params.get("role")
+
             users = User.objects.all()
+
+            # 🔥 Filter by role if provided
+            if role:
+                users = users.filter(role=role)
+
+            # 📌 Stats
+            total_users = User.objects.count()
+            total_clients = User.objects.filter(role="client").count()
+            total_landscapers = User.objects.filter(role="landscaper").count()
+
+            # 🔥 Daily active users (last 24 hours)
+            last_24h = timezone.now() - timedelta(hours=24)
+            daily_active_users = User.objects.filter(last_login__gte=last_24h).count()
+
             serializer = UserSerializer(users, many=True)
-            return Response({"status": "success", "data": serializer.data}, status=status.HTTP_200_OK)
+
+            return Response({
+                "status": "success",
+                "summary": {
+                    "total_users": total_users,
+                    "total_clients": total_clients,
+                    "total_landscapers": total_landscapers,
+                    "daily_active_users": daily_active_users,
+                },
+                "data": serializer.data
+            }, status=status.HTTP_200_OK)
+
         except Exception as e:
-            return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
+            return Response(
+                {"status": "error", "message": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
-# views.py
-from rest_framework import generics, status
-from rest_framework.permissions import IsAdminUser
-from rest_framework.response import Response
-from django.contrib.auth import get_user_model
 
-User = get_user_model()
-
+# delete user admin and own user
 
 class AdminDeleteUserView(generics.DestroyAPIView):
     """

@@ -6,8 +6,6 @@ from .models import OTP
 from .utils import generate_otp, send_otp_email
 
 User = get_user_model() 
-
-
 # ---------------------------
 # SIGNUP SERIALIZER
 # ---------------------------
@@ -15,24 +13,10 @@ from rest_framework import serializers
 from django.core.validators import RegexValidator
 from .models import User, RoleChoices  # make sure RoleChoices exists
 
-class SignupSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(
-        write_only=True,
-        min_length=8,
-        error_messages={
-            "min_length": "Password must be at least 8 characters long.",
-            "blank": "Password field cannot be empty.",
-        },
-    )
-    confirm_password = serializers.CharField(
-        write_only=True,
-        min_length=8,
-        error_messages={
-            "min_length": "Confirm password must be at least 8 characters long.",
-            "blank": "Confirm password field cannot be empty.",
-        },
-    )
+from .enums import RoleChoices
 
+
+class SignupSerializer(serializers.Serializer):
     name = serializers.CharField(
         validators=[
             RegexValidator(
@@ -46,14 +30,73 @@ class SignupSerializer(serializers.ModelSerializer):
         },
     )
 
-    role = serializers.ChoiceField(
-        choices=RoleChoices.choices,  # ❗ user must send role; no default
-        error_messages={"required": "Role field is required."},
+    email = serializers.EmailField(
+        error_messages={
+            "invalid": "Enter a valid email address.",
+            "required": "Email field is required.",
+            "blank": "Email cannot be empty."
+        }
     )
 
-    class Meta:
-        model = User
-        fields = ["name", "email", "password", "confirm_password", "role"]
+    phone = serializers.CharField(
+        validators=[
+            RegexValidator(
+                regex=r"^[0-9]{10,15}$",
+                message="Phone number must contain 10–15 digits.",
+            )
+        ],
+        error_messages={
+            "required": "Phone number is required.",
+            "blank": "Phone number cannot be empty.",
+        }
+    )
+
+    address = serializers.CharField(
+        error_messages={
+            "required": "Address field is required.",
+            "blank": "Address cannot be empty."
+        }
+    )
+
+    latitude = serializers.DecimalField(
+        max_digits=20,
+        decimal_places=14,
+        required=False,
+        allow_null=True
+    )
+
+    longitude = serializers.DecimalField(
+        max_digits=20,
+        decimal_places=14,
+        required=False,
+        allow_null=True
+    )
+
+    password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+        error_messages={
+            "min_length": "Password must be at least 8 characters long.",
+            "blank": "Password field cannot be empty.",
+        },
+    )
+
+    confirm_password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+        error_messages={
+            "min_length": "Confirm password must be at least 8 characters long.",
+            "blank": "Confirm password field cannot be empty.",
+        },
+    )
+
+    role = serializers.ChoiceField(
+        choices=RoleChoices.choices,
+        error_messages={
+            "required": "Role field is required.",
+            "invalid_choice": "Invalid role. Choose a valid role."
+        }
+    )
 
     def validate_email(self, value):
         if User.objects.filter(email=value).exists():
@@ -66,9 +109,6 @@ class SignupSerializer(serializers.ModelSerializer):
                 {"confirm_password": "Passwords do not match."}
             )
         return attrs
-
-    # ❌ REMOVE create() in OTP flow!
-    # User creation happens in VerifyOTPView after OTP is verified
 
 
 # ---------------------------
@@ -120,8 +160,6 @@ class SendOTPSerializer(serializers.Serializer):
 # ---------------------------
 
 
-from rest_framework import serializers
-from .models import OTP
 
 class VerifyOTPSerializer(serializers.Serializer):
     email = serializers.EmailField()
@@ -197,4 +235,4 @@ class ChangePasswordSerializer(serializers.Serializer):
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id', 'name', 'email', 'role', 'is_active', 'date_joined']
+        fields = ['id', 'name', 'email', 'address', 'phone', 'role', 'is_active', 'date_joined']
