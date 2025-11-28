@@ -16,3 +16,13 @@ class ContactMessageSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         user = self.context['request'].user
         return ContactMessage.objects.create(user=user, **validated_data)
+
+
+
+
+class AdminUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ContactMessage
+        # Admin can update category, status, and admin_reply if needed
+        fields = ['category', 'status', 'admin_reply']
+

@@ -47,7 +47,7 @@ INSTALLED_APPS = [
     'corsheaders', 
     'accounts.apps.AccountsConfig',
     'profiles.apps.ProfilesConfig',
-    'chat'
+    'chat',
     
 
 

@@ -16,6 +16,7 @@ class ContactMessage(models.Model):
     status = models.CharField(
         max_length=10, choices=MessageStatus.choices, default=MessageStatus.NEW
     )
+    admin_reply = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     replied_at = models.DateTimeField(blank=True, null=True)
 
