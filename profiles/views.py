@@ -39,3 +39,4 @@ class ChangePasswordView(generics.UpdateAPIView):
         serializer.save()
         update_session_auth_hash(request, serializer.instance)
         return Response({"message": "Password updated successfully"}, status=status.HTTP_200_OK)
+    
