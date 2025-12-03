@@ -44,8 +44,6 @@ class UserManager(BaseUserManager):
 class User(AbstractBaseUser, PermissionsMixin):
     name = models.CharField(max_length=100)
     email = models.EmailField(unique=True)
-
-    # NEW FIELDS
     phone = models.CharField(max_length=20, blank=True, null=True)
     address = models.CharField(max_length=255, blank=True, null=True)
     latitude = models.DecimalField(max_digits=20, decimal_places=14, blank=True, null=True)
@@ -55,7 +53,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     role = models.CharField(max_length=20, choices=RoleChoices.choices)
 
     is_active = models.BooleanField(default=True)
-    is_staff = models.BooleanField(default=False)   # set True for admins
+    is_staff = models.BooleanField(default=False)   
     is_superuser = models.BooleanField(default=False)
     date_joined = models.DateTimeField(auto_now_add=True)
 
@@ -100,7 +98,7 @@ class OTP(models.Model):
     def __str__(self):
         if self.user:
             return f"{self.code} ({self.user.email})"
-        return f"{self.code} ({self.email})"   # ❌ FIXED: removed extra dot
+        return f"{self.code} ({self.email})"   
 
 
 
