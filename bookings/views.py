@@ -21,18 +21,10 @@ class BookingRequestCreateView(generics.CreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def perform_create(self, serializer):
-        print("REQUEST DATA:", self.request.data)
-
-        client = getattr(
-            self.request.user,
-            "clientprofile",
-            None
-        )
+        client = getattr(self.request.user, "clientprofile", None)
 
         if not client:
-            raise PermissionDenied(
-                "Client profile not found."
-            )
+            raise PermissionDenied("Client profile not found.")
 
         serializer.save(
             client=client,

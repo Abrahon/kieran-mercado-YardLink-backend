@@ -255,9 +255,6 @@ class ServiceQuote(models.Model):
 
     message = models.TextField(blank=True, null=True)
 
-    # CLIENT preferred schedule (optional)
-    preferred_date = models.DateField(null=True, blank=True)
-    preferred_time = models.TimeField(null=True, blank=True)
 
     # LANDSCAPER confirmed schedule
     scheduled_date = models.DateField(null=True, blank=True)
@@ -282,96 +279,7 @@ class ServiceQuote(models.Model):
     
 
     
-# # custom service request
-# class ClientCustomService(models.Model):
-#     client = models.ForeignKey(
-#         "profiles.ClientProfile",
-#         on_delete=models.CASCADE,
-#         related_name="custom_services"
-#     )
 
-#     #  Keep landscaper required because client selects landscaper at request time
-#     landscaper = models.ForeignKey(
-#         BusinessProfile,
-#         on_delete=models.CASCADE,
-#         related_name="received_custom_requests",
-#     )
-
-#     name = models.CharField(
-#         max_length=150,
-#         help_text="Custom service name"
-#     )
-
-#     description = models.TextField(
-#         blank=True,
-#         null=True,
-#         help_text="Service description"
-#     )
-
-#     note = models.TextField(
-#         blank=True,
-#         null=True
-#     )
-
-#     #  price stays nullable because landscaper sets it later
-#     price = models.DecimalField(
-#         max_digits=10,
-#         decimal_places=2,
-#         validators=[MinValueValidator(0)],
-#         null=True,
-#         blank=True
-#     )
-
-#     is_active = models.BooleanField(
-#         default=True,
-#         help_text="Deactivate instead of delete"
-#     )
-
-#     STATUS_CHOICES = [
-#         ("pending", "Pending"),
-#         ("accepted", "Accepted"),
-#         ("completed", "Completed"),
-#         ("confirmed", "Confirmed"),
-#         ("declined", "Declined"),
-#     ]
-#     status = models.CharField(
-#         max_length=10,
-#         choices=STATUS_CHOICES,
-#         default="pending",
-#         help_text="Track custom service flow"
-#     )
-
-#     # ✅ optional: store created booking after client confirms
-#     # Uncomment only if you want direct relation with Booking model
-#     # booking = models.OneToOneField(
-#     #     "bookings.Booking",
-#     #     on_delete=models.SET_NULL,
-#     #     null=True,
-#     #     blank=True,
-#     #     related_name="custom_service_request"
-#     # )
-
-#     created_at = models.DateTimeField(default=timezone.now)
-#     updated_at = models.DateTimeField(auto_now=True)
-
-#     class Meta:
-#         ordering = ["-created_at"]
-#         indexes = [
-#             models.Index(fields=["client"]),
-#             models.Index(fields=["landscaper"]),
-#             models.Index(fields=["status"]),
-#         ]
-#         constraints = [
-#             #  good constraint: same client cannot request same named service
-#             # from same landscaper more than once
-#             models.UniqueConstraint(
-#                 fields=["client", "landscaper", "name"],
-#                 name="unique_custom_service_per_landscaper"
-#             )
-#         ]
-
-#     def __str__(self):
-#         return f"{self.name} ({self.client.user.email})"
 
 
 class ClientCustomService(models.Model):

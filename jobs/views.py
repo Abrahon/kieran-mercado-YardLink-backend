@@ -486,8 +486,6 @@ def add_job_note(request, job_id):
 
 
 
-
-
 # --- Add Job Reschedule ---
 class JobRescheduleCreateView(generics.CreateAPIView):
     serializer_class = JobRescheduleSerializer

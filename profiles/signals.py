@@ -9,7 +9,7 @@ from django.contrib.auth import get_user_model
 from .models import LandscaperProfilies
 User = apps.get_model(settings.AUTH_USER_MODEL)
 
-
+User = get_user_model()
 
 @receiver(post_save, sender=User)
 def create_admin_profile(sender, instance, created, **kwargs):
@@ -26,9 +26,10 @@ def save_admin_profile(sender, instance, **kwargs):
 # profiles/signals.py
 
 
-User = get_user_model()
 
 @receiver(post_save, sender=User)
 def create_landscaper_profile(sender, instance, created, **kwargs):
     if created and instance.role == "landscaper":
-        LandscaperProfilies.objects.get_or_create(user=instance)
+        LandscaperProfilies.objects.get_or_create(
+            user=instance
+        )

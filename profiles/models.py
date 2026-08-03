@@ -6,6 +6,8 @@ from cloudinary.models import CloudinaryField
 from invitations .models import TeamInvitation
 from accounts.models import User
 from subscriptions.models import Plan
+from landscapers.models import BusinessProfile
+
 User = get_user_model()
 
 class AdminProfile(models.Model):

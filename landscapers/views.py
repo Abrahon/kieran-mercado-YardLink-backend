@@ -1585,44 +1585,6 @@ class LandscaperQuoteListView(generics.ListAPIView):
 
 
 
-
-
-# class ServiceQuoteCreateView(generics.CreateAPIView):
-#     serializer_class = ServiceQuoteSerializer
-#     permission_classes = [permissions.IsAuthenticated]
-
-#     def perform_create(self, serializer):
-
-#         client = getattr(self.request.user, "clientprofile", None)
-
-#         if not client:
-#             raise ValidationError({
-#                 "error": "Client profile not found."
-#             })
-
-#         service = serializer.validated_data.get("service")
-
-#         if not service:
-#             raise ValidationError({
-#                 "error": "Service is required."
-#             })
-
-#         serializer.save(
-#             client=client,
-#             landscaper=service.business,
-#             status=ServiceQuote.Status.PENDING
-#         )
-
-#     def create(self, request, *args, **kwargs):
-#         try:
-#             return super().create(request, *args, **kwargs)
-
-#         except ValidationError as e:
-#             return Response(
-#                 {"success": False, "errors": e.detail},
-#                 status=status.HTTP_400_BAD_REQUEST
-#             )
-
 # views.py
 
 class ServiceQuoteCreateView(generics.CreateAPIView):

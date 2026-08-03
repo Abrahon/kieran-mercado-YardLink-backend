@@ -1,6 +1,7 @@
 
 
 from django.db import transaction
+from narwhals.selectors import datetime
 from .models import BusinessProfile,ClientCustomService
 from services.serializers import ServiceSerializer
 import json
@@ -526,6 +527,7 @@ class StandardServiceSerializer(serializers.ModelSerializer):
 
 
 # serializers.py
+from jobs.models import Job
 
 class ServiceQuoteSerializer(serializers.ModelSerializer):
 
@@ -576,9 +578,6 @@ class ServiceQuoteSerializer(serializers.ModelSerializer):
             # MESSAGE
             "message",
 
-            # CLIENT PREFERRED
-            "preferred_date",
-            "preferred_time",
 
             # LANDSCAPER CONFIRMED
             "scheduled_date",
@@ -640,42 +639,162 @@ class ServiceQuoteSerializer(serializers.ModelSerializer):
     # VALIDATION
     # =====================================
 
+
+    # =============================================================
+    # INTERCEPT & PARSE THE TIME RANGE STRING BEFORE DRF VALIDATION
+    # =============================================================
+    def validate_scheduled_time(self, value):
+        # If the frontend sent the "09:00 AM - 10:00 AM" format, DRF will pass it 
+        # as a string or fail. We grab the raw initial data to parse it cleanly.
+        raw_time = self.initial_data.get("scheduled_time")
+        
+        if raw_time and isinstance(raw_time, str) and " - " in raw_time:
+            from datetime import datetime
+            try:
+                # Extract the first part: "09:00 AM"
+                start_time_str = raw_time.split(" - ")[0].strip()
+                # Safely transform it into a true Python time object
+                return datetime.strptime(start_time_str, "%I:%M %p").time()
+            except ValueError:
+                raise serializers.ValidationError("Time format must match 'HH:MM AM/PM - HH:MM AM/PM'.")
+        
+        # If it's already a proper time format or object, return it as-is
+        return value
     def validate(self, data):
+            # 1. Run your initial create validation logic (pricing type check)
+            data = super().validate(data)
 
-        service = data.get("service")
+            # =============================================================
+            # IF CREATING: SKIP UPDATE CONTROLS COMPLETELY
+            # =============================================================
+            if not self.instance:
+                return data
 
-        if not service:
-            raise serializers.ValidationError({
-                "service_id": "Service is required."
-            })
+            # =============================================================
+            # IF UPDATING: RUN ROLE & AVAILABILITY CONTROLS
+            # =============================================================
+            request = self.context.get("request")
+            user = request.user if request else None
+            quote = self.instance
+            landscaper_profile = quote.landscaper
 
-        if service.pricing_type != Service.PricingType.REQUEST:
-            raise serializers.ValidationError({
-                "service_id": "Quote requests allowed only for request pricing services."
-            })
+            if not user:
+                raise serializers.ValidationError({"error": "Authentication credentials are required."})
 
-        return data
+            # Match how your view/models fetch profiles
+            user_landscaper_profile = getattr(user, "landscaperprofile", None) or getattr(user, "landscaperprofilies", None)
+            
+            is_landscaper = user_landscaper_profile == landscaper_profile or (
+                hasattr(landscaper_profile, "user") and landscaper_profile.user == user
+            )
+            is_client = getattr(user, "clientprofile", None) == quote.client
 
+            if not is_landscaper and not is_client:
+                raise serializers.ValidationError({"error": "You do not have permission to modify this quote."})
+
+            if is_client and not is_landscaper:
+                restricted_fields = ["price", "scheduled_date", "scheduled_time"]
+                if any(field in data for field in restricted_fields):
+                    raise serializers.ValidationError({
+                        "error": "Clients are not authorized to modify price or schedules directly."
+                    })
+
+            # Extract incoming dates
+            new_date = data.get("scheduled_date") if "scheduled_date" in data else quote.scheduled_date
+            
+            # =============================================================
+            # ✅ FIX: PARSE "09:00 AM - 10:00 AM" STRING RANGE INTO TIME OBJECT
+            # =============================================================
+            raw_time = self.initial_data.get("scheduled_time")
+            if raw_time and isinstance(raw_time, str) and " - " in raw_time:
+                from datetime import datetime
+                try:
+                    # Extract the first part: "09:00 AM"
+                    start_time_str = raw_time.split(" - ")[0].strip()
+                    # Parse to datetime object, then convert to time object
+                    parsed_time = datetime.strptime(start_time_str, "%I:%M %p").time()
+                    data["scheduled_time"] = parsed_time
+                    new_time = parsed_time
+                except ValueError:
+                    raise serializers.ValidationError({"scheduled_time": "Time format must match 'HH:MM AM/PM - HH:MM AM/PM'."})
+            else:
+                new_time = data.get("scheduled_time") if "scheduled_time" in data else quote.scheduled_time
+
+            # Only enforce availability if BOTH date and time are set
+            if new_date and new_time:
+                from datetime import date
+                
+                if new_date < date.today():
+                    raise serializers.ValidationError({"scheduled_date": "Scheduled date cannot be in the past."})
+
+                weekday = new_date.strftime("%A").upper()
+                
+                # Check if this exact start time exists as a valid working hour shift
+                shift_exists = WorkingHours.objects.filter(
+                    landscaper=landscaper_profile,
+                    day=weekday,
+                    start_time=new_time,
+                    is_active=True
+                ).exists()
+
+                if not shift_exists:
+                    raise serializers.ValidationError({
+                        "scheduled_time": f"This time slot is not within the landscaper's working hours for {weekday.title()}."
+                    })
+
+                active_jobs_today = Job.objects.filter(
+                    landscaper=landscaper_profile,
+                    scheduled_date=new_date,
+                    is_active=True,
+                    status__in=["upcoming", "in_progress"]
+                )
+                
+                if active_jobs_today.count() >= 5:
+                    raise serializers.ValidationError({
+                        "scheduled_date": "The landscaper has reached their maximum daily job limit for this date."
+                    })
+
+                if active_jobs_today.filter(scheduled_time=new_time).exists():
+                    raise serializers.ValidationError({
+                        "scheduled_time": "This specific time slot has already been booked by an active job."
+                    })
+
+            return data
     # =====================================
-    # CREATE
+    # CREATE FUNCTION
     # =====================================
-
     def create(self, validated_data):
+        request = self.context.get("request")
+        if not request or not request.user:
+            raise serializers.ValidationError({"error": "Authentication required."})
 
-        request = self.context["request"]
-
+        # Safeguard: Verify the user making the request is actually a client
         client = getattr(request.user, "clientprofile", None)
-
         if not client:
             raise serializers.ValidationError({
-                "error": "Client profile not found."
+                "client": "You must have a Client Profile to submit a quote request."
             })
 
         service = validated_data["service"]
 
+        # Automatically assign backend-managed fields
         validated_data["client"] = client
         validated_data["landscaper"] = service.business
         validated_data["status"] = ServiceQuote.Status.PENDING
         validated_data["price"] = None
 
         return ServiceQuote.objects.create(**validated_data)
+
+    # =====================================
+    # UPDATE FUNCTION
+    # =====================================
+    def update(self, instance, validated_data):
+        """
+        Handles updating quotes while keeping core relationships locked down.
+        """
+        # Prevent rewriting relationships after the quote is already created
+        validated_data.pop("client", None)
+        validated_data.pop("service", None)
+        validated_data.pop("property", None)
+
+        return super().update(instance, validated_data)
