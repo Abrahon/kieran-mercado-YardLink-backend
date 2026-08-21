@@ -148,6 +148,10 @@ class Subscription(models.Model):
         related_name="subscriptions"
     )
 
+    # ==============================
+    # Stripe
+    # ==============================
+
     stripe_customer_id = models.CharField(
         max_length=255,
         blank=True,
@@ -158,6 +162,38 @@ class Subscription(models.Model):
         max_length=255,
         blank=True,
         null=True
+    )
+
+    # ==============================
+    # Apple IAP
+    # ==============================
+
+    apple_original_transaction_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        unique=True
+    )
+
+    apple_transaction_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        unique=True
+    )
+
+    # ==============================
+    # Payment Provider
+    # ==============================
+
+    payment_provider = models.CharField(
+        max_length=20,
+        choices=[
+            ("stripe", "Stripe"),
+            ("apple", "Apple"),
+            ("manual", "Manual"),
+        ],
+        default="stripe"
     )
 
     status = models.CharField(
@@ -314,6 +350,7 @@ class Subscription(models.Model):
 
     def __str__(self):
         return f"{self.user.email} - {self.plan.name}"
+    
 
 
 class SubscriptionLog(models.Model):
