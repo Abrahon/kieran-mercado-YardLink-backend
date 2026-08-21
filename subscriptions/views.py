@@ -5,7 +5,7 @@ from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import generics, permissions
 from django.http import HttpResponse
-from .serializers import PlanSerializer, SubscriptionSerializer,AdminSubscriptionSerializer,SubscriptionUpgradeSerializer
+from .serializers import PlanSerializer, SubscriptionSerializer,AdminSubscriptionSerializer,SubscriptionUpgradeSerializer,AppleVerifySerializer
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.views import APIView
 from rest_framework.exceptions import ValidationError
@@ -170,6 +170,7 @@ class PlanListCreateView(generics.ListCreateAPIView):
             raise serializers.ValidationError({
                 "stripe": str(e)
             })
+        
 
 class PlanRetrieveUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Plan.objects.all()
@@ -497,6 +498,46 @@ def stripe_webhook(request):
     # =========================================================
     return HttpResponse(status=200)
 
+
+
+
+# apple payemnt endpoint
+
+@csrf_exempt
+@api_view(["POST"])
+def apple_iap_webhook(request):
+
+    signed_payload = request.data.get(
+        "signedPayload"
+    )
+
+    if not signed_payload:
+        return Response(
+            {"detail": "signedPayload is required."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+
+        notification = verify_apple_notification(
+            signed_payload
+        )
+
+        # Process notification here
+
+        return Response(
+            {"status": "ok"},
+            status=status.HTTP_200_OK
+        )
+
+    except Exception as e:
+
+        return Response(
+            {
+                "detail": "Invalid Apple notification."
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
 # subscription list
 class SubscriptionListView(generics.ListAPIView):
@@ -1759,3 +1800,196 @@ class AdminRevenueBreakdownAPIView(APIView):
             })
 
         return Response(data)
+
+
+
+# apple verifications endpoint
+class AppleVerifySubscriptionAPIView(APIView):
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+
+        serializer = AppleVerifySerializer(
+            data=request.data
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        transaction_id = serializer.validated_data[
+            "transaction_id"
+        ]
+
+        plan_id = serializer.validated_data[
+            "plan_id"
+        ]
+
+        plan = get_object_or_404(
+            Plan,
+            id=plan_id,
+            is_active=True
+        )
+
+        # Apple verification will go here
+        apple_transaction = verify_apple_transaction(
+            transaction_id
+        )
+
+        if not apple_transaction:
+            return Response(
+                {
+                    "detail": "Apple transaction verification failed."
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # ----------------------------------
+        # Verify Apple product
+        # ----------------------------------
+
+        apple_product_id = apple_transaction.get(
+            "product_id"
+        )
+
+        if apple_product_id != plan.apple_product_id:
+
+            return Response(
+                {
+                    "detail": "Apple product does not match selected plan."
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # ----------------------------------
+        # Transaction information
+        # ----------------------------------
+
+        original_transaction_id = (
+            apple_transaction.get(
+                "original_transaction_id"
+            )
+        )
+
+        apple_transaction_id = (
+            apple_transaction.get(
+                "transaction_id"
+            )
+        )
+
+        expires_date = apple_transaction.get(
+            "expires_date"
+        )
+
+        # ----------------------------------
+        # Prevent duplicate transaction
+        # ----------------------------------
+
+        existing = Subscription.objects.filter(
+            apple_transaction_id=apple_transaction_id
+        ).first()
+
+        if existing:
+
+            return Response(
+                {
+                    "detail": "Transaction already processed.",
+                    "subscription": SubscriptionSerializer(
+                        existing
+                    ).data
+                },
+                status=status.HTTP_200_OK
+            )
+
+        # ----------------------------------
+        # Create / update subscription
+        # ----------------------------------
+
+        subscription = Subscription.objects.filter(
+            user=request.user,
+            payment_provider="apple"
+        ).first()
+
+        if subscription:
+
+            subscription.plan = plan
+
+            subscription.apple_original_transaction_id = (
+                original_transaction_id
+            )
+
+            subscription.apple_transaction_id = (
+                apple_transaction_id
+            )
+
+            subscription.payment_provider = "apple"
+
+            subscription.status = SubscriptionStatus.ACTIVE
+
+            subscription.is_active = True
+
+            subscription.is_trial = False
+
+            subscription.start_date = timezone.now()
+
+            if expires_date:
+                subscription.end_date = expires_date
+            else:
+                subscription.end_date = (
+                    timezone.now()
+                    + timedelta(
+                        days=plan.duration_days
+                    )
+                )
+
+            subscription.save()
+
+        else:
+
+            start_date = timezone.now()
+
+            end_date = (
+                expires_date
+                if expires_date
+                else start_date + timedelta(
+                    days=plan.duration_days
+                )
+            )
+
+            subscription = Subscription.objects.create(
+
+                user=request.user,
+
+                plan=plan,
+
+                payment_provider="apple",
+
+                apple_original_transaction_id=(
+                    original_transaction_id
+                ),
+
+                apple_transaction_id=(
+                    apple_transaction_id
+                ),
+
+                status=SubscriptionStatus.ACTIVE,
+
+                is_active=True,
+
+                is_trial=False,
+
+                start_date=start_date,
+
+                end_date=end_date,
+
+                auto_renew=True,
+            )
+
+        return Response(
+            {
+                "message": "Apple subscription verified successfully.",
+                "subscription": SubscriptionSerializer(
+                    subscription
+                ).data
+            },
+            status=status.HTTP_200_OK
+        )

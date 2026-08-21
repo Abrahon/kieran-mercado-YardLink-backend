@@ -345,6 +345,35 @@ WEATHER_API_KEY = "a8be0217636541c2b0b214446262001"  # <-- Paste your real Weath
 DEFAULT_CITY = "Dhaka,BD"
 RAIN_ALERT_THRESHOLD = 30
 
+# ------------------------------------------------------------------------------
+# APPLE PAYMENT
+# ------------------------------------------------------------------------------
+
+APPLE_KEY_ID = os.getenv(
+    "APPLE_KEY_ID"
+)
+
+APPLE_ISSUER_ID = os.getenv(
+    "APPLE_ISSUER_ID"
+)
+
+APPLE_BUNDLE_ID = os.getenv(
+    "APPLE_BUNDLE_ID"
+)
+
+APPLE_PRIVATE_KEY_PATH = os.getenv(
+    "APPLE_PRIVATE_KEY_PATH"
+)
+
+APPLE_ROOT_CERTIFICATES_PATH = os.getenv(
+    "APPLE_ROOT_CERTIFICATES_PATH"
+)
+
+APPLE_ENVIRONMENT = os.getenv(
+    "APPLE_ENVIRONMENT",
+    "sandbox"
+)
+
 
 # ------------------------------------------------------------------------------
 # COOKIES / SECURITY

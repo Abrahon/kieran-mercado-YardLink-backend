@@ -61,7 +61,18 @@ urlpatterns = [
         "admin/revenue-breakdown/",
         views.AdminRevenueBreakdownAPIView.as_view(),
         name="admin-revenue-breakdown",
-),
+    ),
+    # apple verification 
+    path(
+        "subscriptions/apple-verify/",
+        views.AppleVerifySubscriptionAPIView.as_view(),
+        name="apple-verify-subscription"
+    ),
+    path(
+        "webhooks/apple-iap/",
+        views.apple_iap_webhook,
+        name="apple-iap-webhook"
+    ),
 
 
 ]

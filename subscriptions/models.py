@@ -58,6 +58,12 @@ class Plan(models.Model):
         blank=True,
         null=True
     )
+    # apple_product_id = models.CharField(
+    #     max_length=255,
+    #     blank=True,
+    #     null=True,
+    #     unique=True
+    # )
 
     trial_notified_days = models.JSONField(
         default=list,

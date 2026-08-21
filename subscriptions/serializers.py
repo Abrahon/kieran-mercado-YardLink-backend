@@ -79,7 +79,16 @@ class PlanSerializer(serializers.ModelSerializer):
 class SubscriptionSerializer(serializers.ModelSerializer):
     plan_name = serializers.CharField(source="plan.name", read_only=True)
     user_email = serializers.CharField(source="user.email", read_only=True)
-    user_name = serializers.CharField(source="user.name", read_only=True)  
+    user_name = serializers.CharField(source="user.name", read_only=True)
+    payment_provider = serializers.CharField(read_only=True)
+
+    apple_original_transaction_id = serializers.CharField(
+        read_only=True
+    )
+
+    apple_transaction_id = serializers.CharField(
+        read_only=True
+    )  
     remaining_days = serializers.SerializerMethodField()
     is_trial = serializers.SerializerMethodField() 
     trial_remaining_days = serializers.SerializerMethodField()
@@ -95,6 +104,9 @@ class SubscriptionSerializer(serializers.ModelSerializer):
             "user_email",
             "plan",
             "plan_name",
+            "payment_provider",
+            "apple_original_transaction_id",
+            "apple_transaction_id",
             "status",
             "is_active",
             "is_trial",
@@ -219,6 +231,15 @@ class AdminSubscriptionSerializer(serializers.ModelSerializer):
     user_email = serializers.EmailField(source="user.email", read_only=True)
     user_name = serializers.CharField(source="user.name", read_only=True)
     plan_name = serializers.CharField(source="plan.name", read_only=True)
+    payment_provider = serializers.CharField(read_only=True)
+
+    apple_original_transaction_id = serializers.CharField(
+        read_only=True
+    )
+
+    apple_transaction_id = serializers.CharField(
+        read_only=True
+    )
     plan_price = serializers.DecimalField(
         source="plan.price",
         max_digits=10,
@@ -237,6 +258,9 @@ class AdminSubscriptionSerializer(serializers.ModelSerializer):
             "user_email",
             "user_name",
             "plan_name",
+            "payment_provider",
+            "apple_original_transaction_id",
+            "apple_transaction_id",
             "plan_price",
             "status",
             "is_active",
@@ -370,6 +394,8 @@ class AdminLandscaperSubscriptionEditSerializer(serializers.ModelSerializer):
         instance.save()
         return instance
 
+    
+
 from rest_framework import serializers
 from .models import Plan, Subscription
 from django.utils import timezone
@@ -409,3 +435,39 @@ class SubscriptionLogSerializer(serializers.ModelSerializer):
             "ip_address",
             "created_at",
         ]
+
+
+
+class AppleVerifySerializer(serializers.Serializer):
+
+    transaction_id = serializers.CharField(
+        required=True,
+        max_length=255
+    )
+
+    plan_id = serializers.IntegerField(
+        required=True
+    )
+
+    def validate_transaction_id(self, value):
+        value = value.strip()
+
+        if not value:
+            raise serializers.ValidationError(
+                "Apple transaction ID is required."
+            )
+
+        return value
+
+    def validate_plan_id(self, value):
+
+        if not Plan.objects.filter(
+            id=value,
+            is_active=True
+        ).exists():
+
+            raise serializers.ValidationError(
+                "Invalid or inactive plan."
+            )
+
+        return value
