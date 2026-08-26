@@ -95,6 +95,7 @@ from django.db.models.functions import Coalesce
 from .models import Plan, Subscription, SubscriptionStatus
 stripe.api_key = settings.STRIPE_SECRET_KEY
 from notifications.models import Notification
+from .services.apple_iap import verify_apple_notification,verify_signed_transaction_info, process_apple_subscription_notification
 
 
 
@@ -512,25 +513,85 @@ def apple_iap_webhook(request):
     )
 
     if not signed_payload:
+
         return Response(
-            {"detail": "signedPayload is required."},
+            {
+                "detail": "signedPayload is required."
+            },
             status=status.HTTP_400_BAD_REQUEST
         )
 
     try:
 
-        notification = verify_apple_notification(
-            signed_payload
+        notification = (
+            verify_apple_notification(
+                signed_payload
+            )
         )
 
-        # Process notification here
+        notification_type = getattr(
+            notification,
+            "notificationType",
+            None
+        )
+
+        subtype = getattr(
+            notification,
+            "subtype",
+            None
+        )
+
+        data = getattr(
+            notification,
+            "data",
+            None
+        )
+
+        print(
+            "Apple notification:",
+            notification_type,
+            subtype
+        )
+
+        # ==================================================
+        # Process transaction information
+        # ==================================================
+
+        if data:
+
+            signed_transaction_info = getattr(
+                data,
+                "signedTransactionInfo",
+                None
+            )
+
+            if signed_transaction_info:
+
+                transaction = (
+                    verify_signed_transaction_info(
+                        signed_transaction_info
+                    )
+                )
+
+                process_apple_subscription_notification(
+                    notification_type=notification_type,
+                    subtype=subtype,
+                    transaction=transaction
+                )
 
         return Response(
-            {"status": "ok"},
+            {
+                "status": "ok"
+            },
             status=status.HTTP_200_OK
         )
 
     except Exception as e:
+
+        print(
+            "Apple notification verification error:",
+            str(e)
+        )
 
         return Response(
             {
@@ -538,7 +599,6 @@ def apple_iap_webhook(request):
             },
             status=status.HTTP_400_BAD_REQUEST
         )
-
 # subscription list
 class SubscriptionListView(generics.ListAPIView):
     serializer_class = SubscriptionSerializer

@@ -4,7 +4,6 @@ from django.utils import timezone
 from datetime import timedelta
 from django.contrib.auth import get_user_model
 from subscriptions.models import Subscription, SubscriptionLog
-
 User = get_user_model()
 
 from decimal import Decimal
@@ -25,6 +24,7 @@ class PlanSerializer(serializers.ModelSerializer):
             "price",
             "discount",
             "final_price",
+            "apple_product_id",
             "duration",
             "is_active",
             "created_at",
@@ -181,36 +181,33 @@ class SubscriptionSerializer(serializers.ModelSerializer):
         plan = validated_data["plan"]
 
         start_date = timezone.now()
-        duration_days = 30 if plan.duration == "monthly" else 365
+
+        duration_days = (
+            30 if plan.duration == "monthly"
+            else 365
+        )
+
         end_date = start_date + timedelta(days=duration_days)
 
-        # Double-check before creating
-        if Subscription.objects.filter(user=user, status="active").exists():
-            raise serializers.ValidationError(
-                {"subscription": "User already has an active subscription."}
-            )
-    def get_status(self, obj):
-        if not obj.is_trial and obj.end_date < timezone.now():
-            return "expired"  # Paid subscription expired
-        return obj.status
-
-    # -----------------------------
-    # Dynamic is_active
-    # -----------------------------
-    def get_is_active(self, obj):
-        if not obj.is_trial and obj.end_date < timezone.now():
-            return False  # Paid subscription expired
-        return obj.is_active
-
+        if Subscription.objects.filter(
+            user=user,
+            status="active"
+        ).exists():
+            raise serializers.ValidationError({
+                "subscription": "User already has an active subscription."
+            })
 
         subscription = Subscription.objects.create(
             user=user,
             plan=plan,
             status="active",
-            is_active=True,        
+            is_active=True,
             start_date=start_date,
             end_date=end_date,
+            payment_provider="stripe",
         )
+
+        return subscription
 
 
 

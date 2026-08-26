@@ -203,3 +203,375 @@ def verify_apple_notification(
     )
 
     return decoded_notification
+
+
+def verify_signed_transaction_info(
+    signed_transaction_info
+):
+    """
+    Verify and decode the signed transaction
+    contained inside an Apple notification.
+    """
+
+    if not signed_transaction_info:
+
+        raise ValueError(
+            "signedTransactionInfo is missing."
+        )
+
+    verifier = SignedDataVerifier(
+        root_certificates=get_apple_root_certificates(),
+        enable_online_checks=True,
+        environment=get_apple_environment(),
+        bundle_id=APPLE_BUNDLE_ID,
+        app_apple_id=None,
+    )
+
+    transaction = (
+        verifier.verify_and_decode_signed_transaction(
+            signed_transaction_info
+        )
+    )
+
+    return transaction
+# ============================================================
+# Process Apple Subscription Notification
+# ============================================================
+
+def process_apple_subscription_notification(notification):
+    """
+    Process a verified App Store Server Notification V2.
+
+    The notification must already be verified using
+    verify_apple_notification().
+
+    Updates the local Subscription record based on
+    Apple's notification type/subtype.
+    """
+
+    from django.utils import timezone
+    from subscriptions.models import Subscription, SubscriptionStatus
+
+    # --------------------------------------------------------
+    # Get notification type
+    # --------------------------------------------------------
+
+    notification_type = getattr(
+        notification,
+        "notificationType",
+        None
+    )
+
+    subtype = getattr(
+        notification,
+        "subtype",
+        None
+    )
+
+    data = getattr(
+        notification,
+        "data",
+        None
+    )
+
+    if not data:
+        return {
+            "processed": False,
+            "message": "Notification data is missing."
+        }
+
+    # --------------------------------------------------------
+    # Get signed transaction information
+    # --------------------------------------------------------
+
+    signed_transaction_info = getattr(
+        data,
+        "signedTransactionInfo",
+        None
+    )
+
+    if not signed_transaction_info:
+        return {
+            "processed": False,
+            "message": "signedTransactionInfo is missing."
+        }
+
+    # --------------------------------------------------------
+    # Verify transaction
+    # --------------------------------------------------------
+
+    transaction = verify_signed_transaction_info(
+        signed_transaction_info
+    )
+
+    # --------------------------------------------------------
+    # Extract Apple transaction IDs
+    # --------------------------------------------------------
+
+    transaction_id = getattr(
+        transaction,
+        "transactionId",
+        None
+    )
+
+    original_transaction_id = getattr(
+        transaction,
+        "originalTransactionId",
+        None
+    )
+
+    product_id = getattr(
+        transaction,
+        "productId",
+        None
+    )
+
+    expires_date = getattr(
+        transaction,
+        "expiresDate",
+        None
+    )
+
+    purchase_date = getattr(
+        transaction,
+        "purchaseDate",
+        None
+    )
+
+    if not original_transaction_id:
+        return {
+            "processed": False,
+            "message": "originalTransactionId is missing."
+        }
+
+    # --------------------------------------------------------
+    # Find local subscription
+    # --------------------------------------------------------
+
+    subscription = (
+        Subscription.objects
+        .select_related("user", "plan")
+        .filter(
+            apple_original_transaction_id=
+                original_transaction_id
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+    if not subscription:
+
+        # Fallback to current transaction ID
+        if transaction_id:
+            subscription = (
+                Subscription.objects
+                .select_related("user", "plan")
+                .filter(
+                    apple_transaction_id=transaction_id
+                )
+                .order_by("-created_at")
+                .first()
+            )
+
+    if not subscription:
+
+        return {
+            "processed": False,
+            "message": "Subscription not found.",
+            "original_transaction_id":
+                original_transaction_id,
+            "transaction_id":
+                transaction_id,
+            "product_id":
+                product_id,
+        }
+
+    # --------------------------------------------------------
+    # Update Apple transaction information
+    # --------------------------------------------------------
+
+    subscription.apple_original_transaction_id = (
+        original_transaction_id
+    )
+
+    if transaction_id:
+        subscription.apple_transaction_id = transaction_id
+
+    subscription.payment_provider = "apple"
+
+    # --------------------------------------------------------
+    # Process notification types
+    # --------------------------------------------------------
+
+    # --------------------------------------------------------
+    # DID_RENEW
+    # --------------------------------------------------------
+
+    if notification_type == "DID_RENEW":
+
+        subscription.status = (
+            SubscriptionStatus.ACTIVE
+        )
+
+        subscription.is_active = True
+        subscription.is_trial = False
+
+        if purchase_date:
+            subscription.start_date = (
+                timezone.datetime.fromtimestamp(
+                    purchase_date / 1000,
+                    tz=timezone.utc
+                )
+            )
+
+        if expires_date:
+            subscription.end_date = (
+                timezone.datetime.fromtimestamp(
+                    expires_date / 1000,
+                    tz=timezone.utc
+                )
+            )
+
+        subscription.auto_renew = True
+
+    # --------------------------------------------------------
+    # DID_CHANGE_RENEWAL_STATUS
+    # --------------------------------------------------------
+
+    elif notification_type == "DID_CHANGE_RENEWAL_STATUS":
+
+        if subtype == "AUTO_RENEW_DISABLED":
+
+            subscription.auto_renew = False
+
+        elif subtype == "AUTO_RENEW_ENABLED":
+
+            subscription.auto_renew = True
+
+    # --------------------------------------------------------
+    # DID_FAIL_TO_RENEW
+    # --------------------------------------------------------
+
+    elif notification_type == "DID_FAIL_TO_RENEW":
+
+        subscription.status = (
+            SubscriptionStatus.PAST_DUE
+            if hasattr(
+                SubscriptionStatus,
+                "PAST_DUE"
+            )
+            else "past_due"
+        )
+
+        subscription.is_active = False
+
+    # --------------------------------------------------------
+    # EXPIRED
+    # --------------------------------------------------------
+
+    elif notification_type == "EXPIRED":
+
+        subscription.status = (
+            SubscriptionStatus.EXPIRED
+            if hasattr(
+                SubscriptionStatus,
+                "EXPIRED"
+            )
+            else "expired"
+        )
+
+        subscription.is_active = False
+        subscription.auto_renew = False
+
+        if expires_date:
+            subscription.end_date = (
+                timezone.datetime.fromtimestamp(
+                    expires_date / 1000,
+                    tz=timezone.utc
+                )
+            )
+
+    # --------------------------------------------------------
+    # GRACE_PERIOD_EXPIRED
+    # --------------------------------------------------------
+
+    elif notification_type == "GRACE_PERIOD_EXPIRED":
+
+        subscription.status = (
+            SubscriptionStatus.EXPIRED
+            if hasattr(
+                SubscriptionStatus,
+                "EXPIRED"
+            )
+            else "expired"
+        )
+
+        subscription.is_active = False
+
+    # --------------------------------------------------------
+    # REFUND
+    # --------------------------------------------------------
+
+    elif notification_type == "REFUND":
+
+        subscription.status = (
+            SubscriptionStatus.CANCELLED
+            if hasattr(
+                SubscriptionStatus,
+                "CANCELLED"
+            )
+            else "cancelled"
+        )
+
+        subscription.is_active = False
+        subscription.auto_renew = False
+
+    # --------------------------------------------------------
+    # REVOKE
+    # --------------------------------------------------------
+
+    elif notification_type == "REVOKE":
+
+        subscription.status = (
+            SubscriptionStatus.CANCELLED
+            if hasattr(
+                SubscriptionStatus,
+                "CANCELLED"
+            )
+            else "cancelled"
+        )
+
+        subscription.is_active = False
+        subscription.auto_renew = False
+
+    # --------------------------------------------------------
+    # DID_RENEW / other events with expiration
+    # --------------------------------------------------------
+
+    if expires_date:
+
+        subscription.end_date = (
+            timezone.datetime.fromtimestamp(
+                expires_date / 1000,
+                tz=timezone.utc
+            )
+        )
+
+    # --------------------------------------------------------
+    # Save
+    # --------------------------------------------------------
+
+    subscription.save()
+
+    return {
+        "processed": True,
+        "notification_type": notification_type,
+        "subtype": subtype,
+        "subscription_id": subscription.id,
+        "transaction_id": transaction_id,
+        "original_transaction_id":
+            original_transaction_id,
+        "product_id": product_id,
+        "status": subscription.status,
+        "is_active": subscription.is_active,
+    }
