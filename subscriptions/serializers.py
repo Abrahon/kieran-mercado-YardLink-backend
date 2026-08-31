@@ -77,10 +77,24 @@ class PlanSerializer(serializers.ModelSerializer):
 
 
 class SubscriptionSerializer(serializers.ModelSerializer):
-    plan_name = serializers.CharField(source="plan.name", read_only=True)
-    user_email = serializers.CharField(source="user.email", read_only=True)
-    user_name = serializers.CharField(source="user.name", read_only=True)
-    payment_provider = serializers.CharField(read_only=True)
+    plan_name = serializers.CharField(
+        source="plan.name",
+        read_only=True
+    )
+
+    user_email = serializers.CharField(
+        source="user.email",
+        read_only=True
+    )
+
+    user_name = serializers.CharField(
+        source="user.name",
+        read_only=True
+    )
+
+    payment_provider = serializers.CharField(
+        read_only=True
+    )
 
     apple_original_transaction_id = serializers.CharField(
         read_only=True
@@ -88,19 +102,26 @@ class SubscriptionSerializer(serializers.ModelSerializer):
 
     apple_transaction_id = serializers.CharField(
         read_only=True
-    )  
+    )
+
     remaining_days = serializers.SerializerMethodField()
-    is_trial = serializers.SerializerMethodField() 
+
+    is_trial = serializers.SerializerMethodField()
+
     trial_remaining_days = serializers.SerializerMethodField()
-    status = serializers.SerializerMethodField()  # override status dynamically
-    is_active = serializers.SerializerMethodField()  # override is_active dynamically
+
+    # Dynamically calculated fields
+    status = serializers.SerializerMethodField()
+
+    is_active = serializers.SerializerMethodField()
 
     class Meta:
         model = Subscription
+
         fields = [
             "id",
             "user",
-            "user_name",     
+            "user_name",
             "user_email",
             "plan",
             "plan_name",
@@ -110,106 +131,317 @@ class SubscriptionSerializer(serializers.ModelSerializer):
             "status",
             "is_active",
             "is_trial",
-            "trial_remaining_days", 
+            "trial_remaining_days",
             "start_date",
             "end_date",
             "remaining_days",
             "created_at",
         ]
-        read_only_fields = (
+
+        read_only_fields = [
             "id",
             "user",
-            "status",
-            "start_date",
-            "end_date",
-            "created_at",
             "user_name",
             "user_email",
             "plan_name",
+            "payment_provider",
+            "apple_original_transaction_id",
+            "apple_transaction_id",
+            "status",
+            "is_active",
             "is_trial",
-        )
+            "trial_remaining_days",
+            "start_date",
+            "end_date",
+            "created_at",
+            "remaining_days",
+        ]
 
+    # ==========================================================
+    # DYNAMIC STATUS
+    # ==========================================================
+
+    def get_status(self, obj):
+        """
+        Return the current subscription status based on
+        the subscription dates.
+
+        Possible values:
+            active
+            expired
+            pending
+            cancelled
+        """
+
+        now = timezone.now()
+
+        # Preserve cancelled status
+        if obj.status == "cancelled":
+            return "cancelled"
+
+        # Preserve pending status
+        if obj.status == "pending":
+            return "pending"
+
+        # If subscription has an end date and it has passed
+        if obj.end_date and now >= obj.end_date:
+            return "expired"
+
+        # If subscription hasn't started yet
+        if obj.start_date and now < obj.start_date:
+            return "pending"
+
+        return "active"
+
+    # ==========================================================
+    # DYNAMIC ACTIVE STATUS
+    # ==========================================================
+
+    def get_is_active(self, obj):
+        """
+        Determine whether the subscription is currently active.
+        """
+
+        now = timezone.now()
+
+        # Must have started
+        if obj.start_date and now < obj.start_date:
+            return False
+
+        # Must not be expired
+        if obj.end_date and now >= obj.end_date:
+            return False
+
+        # Cancelled subscriptions are inactive
+        if obj.status == "cancelled":
+            return False
+
+        # Pending subscriptions are inactive
+        if obj.status == "pending":
+            return False
+
+        return True
+
+    # ==========================================================
+    # REMAINING DAYS
+    # ==========================================================
 
     def get_remaining_days(self, obj):
-        remaining = (obj.end_date - timezone.now()).days
-        return max(remaining, 0)
-    
-    def get_is_trial(self, obj):
-        trial_period_days = 14
-        trial_end_date = obj.start_date + timedelta(days=trial_period_days)
-        return timezone.now() <= trial_end_date
-    
+        """
+        Number of days remaining until subscription expires.
+        """
 
+        if not obj.end_date:
+            return 0
+
+        now = timezone.now()
+
+        if now >= obj.end_date:
+            return 0
+
+        return max(
+            (obj.end_date - now).days,
+            0
+        )
+
+    # ==========================================================
+    # TRIAL STATUS
+    # ==========================================================
+
+    def get_is_trial(self, obj):
+        """
+        Determine whether the subscription is currently
+        within the 14-day trial period.
+        """
+
+        if not obj.start_date:
+            return False
+
+        trial_period_days = 14
+
+        trial_end_date = (
+            obj.start_date +
+            timedelta(days=trial_period_days)
+        )
+
+        now = timezone.now()
+
+        # Trial must also be within the subscription period
+        if obj.end_date and now >= obj.end_date:
+            return False
+
+        return now < trial_end_date
+
+    # ==========================================================
+    # TRIAL REMAINING DAYS
+    # ==========================================================
 
     def get_trial_remaining_days(self, obj):
-        trial_days = 14
-        trial_end = obj.start_date + timedelta(days=trial_days)
+        """
+        Return remaining trial days.
+
+        Returns:
+            integer -> trial still active
+            None    -> trial has ended
+        """
+
+        if not obj.start_date:
+            return None
+
+        trial_period_days = 14
+
+        trial_end = (
+            obj.start_date +
+            timedelta(days=trial_period_days)
+        )
+
         now = timezone.now()
-        if now <= trial_end:
-            return max((trial_end - now).days, 0)
-        return None  # not a trial anymore
+
+        # Trial has ended
+        if now >= trial_end:
+            return None
+
+        remaining = (
+            trial_end - now
+        ).days
+
+        return max(remaining, 0)
+
+    # ==========================================================
+    # VALIDATION
+    # ==========================================================
 
     def validate(self, attrs):
         request = self.context.get("request")
+
+        if not request or not request.user.is_authenticated:
+            raise serializers.ValidationError({
+                "user": "User must be authenticated."
+            })
+
         user = request.user
+
         plan = attrs.get("plan")
 
-        if user is None:
-            raise serializers.ValidationError({"user": "User must be authenticated."})
-
+        # ------------------------------------------------------
         # Role validation
+        # ------------------------------------------------------
+
         if user.role not in ["client", "landscaper"]:
-            raise serializers.ValidationError(
-                {"user": "Only clients or landscapers can subscribe."}
-            )
+            raise serializers.ValidationError({
+                "user": "Only clients or landscapers can subscribe."
+            })
 
-        # Plan active
+        # ------------------------------------------------------
+        # Plan validation
+        # ------------------------------------------------------
+
+        if not plan:
+            raise serializers.ValidationError({
+                "plan": "A subscription plan is required."
+            })
+
         if not plan.is_active:
-            raise serializers.ValidationError({"plan": "This plan is inactive."})
+            raise serializers.ValidationError({
+                "plan": "This plan is inactive."
+            })
 
-        # One active subscription per user
-        if Subscription.objects.filter(user=user, status="active").exists():
-            raise serializers.ValidationError(
-                {"subscription": "User already has an active subscription."}
-            )
+        # ------------------------------------------------------
+        # Active subscription validation
+        # ------------------------------------------------------
+
+        now = timezone.now()
+
+        active_subscription_exists = (
+            Subscription.objects.filter(
+                user=user,
+                status="active",
+                start_date__lte=now,
+                end_date__gt=now,
+            ).exists()
+        )
+
+        if active_subscription_exists:
+            raise serializers.ValidationError({
+                "subscription":
+                    "User already has an active subscription."
+            })
 
         return attrs
 
+    # ==========================================================
+    # CREATE
+    # ==========================================================
+
     def create(self, validated_data):
         request = self.context.get("request")
+
+        if not request or not request.user.is_authenticated:
+            raise serializers.ValidationError({
+                "user": "User must be authenticated."
+            })
+
         user = request.user
         plan = validated_data["plan"]
 
-        start_date = timezone.now()
+        now = timezone.now()
 
-        duration_days = (
-            30 if plan.duration == "monthly"
-            else 365
+        # ------------------------------------------------------
+        # Prevent duplicate active subscription
+        # ------------------------------------------------------
+
+        active_subscription_exists = (
+            Subscription.objects.filter(
+                user=user,
+                status="active",
+                start_date__lte=now,
+                end_date__gt=now,
+            ).exists()
         )
 
-        end_date = start_date + timedelta(days=duration_days)
-
-        if Subscription.objects.filter(
-            user=user,
-            status="active"
-        ).exists():
+        if active_subscription_exists:
             raise serializers.ValidationError({
-                "subscription": "User already has an active subscription."
+                "subscription":
+                    "User already has an active subscription."
             })
+
+        # ------------------------------------------------------
+        # Calculate duration
+        # ------------------------------------------------------
+
+        if plan.duration == "monthly":
+            duration_days = 30
+
+        elif plan.duration == "yearly":
+            duration_days = 365
+
+        elif plan.duration == "annual":
+            duration_days = 365
+
+        else:
+            # Default fallback
+            duration_days = 30
+
+        end_date = (
+            now +
+            timedelta(days=duration_days)
+        )
+
+        # ------------------------------------------------------
+        # Create subscription
+        # ------------------------------------------------------
 
         subscription = Subscription.objects.create(
             user=user,
             plan=plan,
             status="active",
             is_active=True,
-            start_date=start_date,
+            start_date=now,
             end_date=end_date,
             payment_provider="stripe",
         )
 
         return subscription
-
-
 
 class SubscriptionUpgradeSerializer(serializers.ModelSerializer):
     plan_name = serializers.CharField(source="plan.name", read_only=True)
